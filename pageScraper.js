@@ -16,30 +16,33 @@ const scraperObject = {
       });
       return links;
     });
-    console.log(urls);
+    let pagePromise = (link) =>
+      new Promise(async (resolve, reject) => {
+        let dataObj = {};
+        let newPage = await browser.newPage();
+        await newPage.goto(link);
+
+        // Scrape all h1 elements
+        dataObj["blogTitles"] = await newPage.$$eval(
+          ".story-grid div > h1",
+          (elements) => elements.map((el) => el.textContent)
+        );
+
+        // Scrape all p elements
+        dataObj["blogContent"] = await newPage.$$eval(
+          ".story-grid div > p",
+          (elements) => elements.map((el) => el.textContent)
+        );
+
+        resolve(dataObj);
+        await newPage.close();
+      });
+
+    for (link in urls) {
+      let currentPageData = await pagePromise(urls[link]);
+      console.log(currentPageData);
+    }
   },
 };
 
 module.exports = scraperObject;
-// let pagePromise = (link) =>
-//   new Promise(async (resolve, reject) => {
-//     let dataObj = {};
-//     let newPage = await browser.newPage();
-//     await newPage.goto(link);
-//     dataObj["blogTitle"] = await newPage.$eval(
-//       ".story-title-info > h1",
-//       (text) => text.textContent
-//     );
-//     dataObj["blogContent"] = await newPage.$eval(
-//       ".story-title-info > h1",
-//       (text) => text.textContent
-//     );
-//     resolve(dataObj);
-//     await newPage.close();
-//   });
-
-// for (link in urls) {
-//   let currentPageData = await pagePromise(urls[link]);
-//   // scrapedData.push(currentPageData);
-//   console.log(currentPageData);
-// }
