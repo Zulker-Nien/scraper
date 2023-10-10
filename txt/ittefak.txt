@@ -1,0 +1,134 @@
+const createCsvWriter = require("csv-writer").createObjectCsvWriter;
+
+const scraperObject = {
+  url: "https://www.ittefaq.com.bd/lifestyle",
+  async scraper(browser) {
+    let page = await browser.newPage();
+    let countNumber = 0;
+    console.log(`Navigating to ${this.url}...`);
+    // Navigate to the selected page
+    await page.goto(this.url);
+    // Wait for the required DOM to be rendered
+    await page.waitForSelector(".whole_outer");
+
+    let data = [];
+    let timeoutUrls = []; // Array to store URLs that timed out
+
+    // Function to scrape data from a page
+    const scrapePage = async (link) => {
+      let dataObj = {};
+      let newPage = await browser.newPage();
+      try {
+        await newPage.goto(link, { timeout: 60000 });
+        await newPage.waitForSelector(".content_detail h1");
+        console.log(countNumber++);
+
+        // Scrape all h3 elements
+        dataObj["blogTitles"] = await newPage.$eval(
+          ".content_detail h1",
+          (element) => element.textContent
+        );
+
+        // Scrape all p elements
+        dataObj["blogContent"] = await newPage.$$eval(
+          ".content_detail_content_inner .jw_article_body p",
+          (elements) =>
+            elements
+              .map((el) => el.textContent.trim())
+              .filter((text) => !text.startsWith("jwARI.fetch("))
+        );
+      } catch (error) {
+        console.error(`Error loading URL: ${link}`);
+        timeoutUrls.push(link); // Add the URL to the timeoutUrls array
+      } finally {
+        await newPage.close();
+      }
+      return dataObj;
+    };
+
+    const loadMoreBlogs = async () => {
+      let hasMoreButton = true;
+      while (hasMoreButton) {
+        const isButtonVisible = await page.evaluate(() => {
+          const moreButton = document.querySelector(".load_more_status button");
+          const computedStyle = window.getComputedStyle(moreButton);
+          return computedStyle.visibility !== "hidden";
+        });
+
+        if (!isButtonVisible) {
+          hasMoreButton = false;
+        } else {
+          const moreButton = await page.$(".load_more_status button");
+          if (moreButton) {
+            try {
+              await moreButton.click();
+              await page.waitForTimeout(2000); // Wait for the new content to load (adjust the wait time as needed)
+            } catch (error) {
+              // Handle the error when the "more" button is not clickable
+              hasMoreButton = false;
+            }
+          } else {
+            hasMoreButton = false;
+          }
+        }
+      }
+    };
+
+    // Load more blogs and scrape data
+    await loadMoreBlogs();
+
+    // Get the links to all the required blogs
+    let urls = await page.evaluate(() => {
+      const links = [];
+      const linkElements = document.querySelectorAll(".pagemaker .has_ai a");
+      linkElements.forEach((el) => {
+        const href = el.href;
+        if (
+          !href.includes(
+            "https://www.ittefaq.com.bd/topic/%E0%A6%AC%E0%A6%BF%E0%A6%B6%E0%A7%87%E0%A6%B7-%E0%A6%B8%E0%A6%82%E0%A6%AC%E0%A6%BE%E0%A6%A6"
+          )
+        ) {
+          links.push(href);
+        }
+      });
+      return links;
+    });
+
+    // Scrape data from each blog page
+    for (let link of urls) {
+      let currentPageData = await scrapePage(link);
+      data.push(currentPageData);
+    }
+
+    // Define CSV writer and write the data to a CSV file
+    const csvWriter = createCsvWriter({
+      path: "scraped_data.csv",
+      header: [
+        { id: "blogTitles", title: "Blog Titles" },
+        { id: "blogContent", title: "Blog Content" },
+      ],
+    });
+
+    csvWriter
+      .writeRecords(data)
+      .then(() => console.log("CSV file written successfully"))
+      .catch((error) => console.error("Error writing CSV file:", error));
+
+    // Export timeout URLs to a separate CSV file
+    if (timeoutUrls.length > 0) {
+      const timeoutCsvWriter = createCsvWriter({
+        path: "timeout_urls.csv",
+        header: [{ id: "url", title: "URL" }],
+      });
+
+      timeoutCsvWriter
+        .writeRecords(timeoutUrls.map((url) => ({ url })))
+        .then(() => console.log("Timeout URLs exported to timeout_urls.csv"))
+        .catch((error) =>
+          console.error("Error exporting timeout URLs:", error)
+        );
+    }
+  },
+};
+
+module.exports = scraperObject;

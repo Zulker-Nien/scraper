@@ -1,0 +1,91 @@
+const createCsvWriter = require("csv-writer").createObjectCsvWriter;
+
+const scraperObject = {
+  url: "https://www.prothomalo.com/lifestyle/shopping",
+  async scraper(browser) {
+    let page = await browser.newPage();
+    console.log(`Navigating to ${this.url}...`);
+    // Navigate to the selected page
+    await page.goto(this.url);
+    // Wait for the required DOM to be rendered
+    await page.waitForSelector(".header");
+
+    let data = [];
+
+    // Function to scrape data from a page
+    const scrapePage = async (link) => {
+      let dataObj = {};
+      let newPage = await browser.newPage();
+      await newPage.goto(link);
+
+      // Scrape all h1 elements
+      dataObj["blogTitles"] = await newPage.$$eval(
+        ".story-grid div > h1",
+        (elements) => elements.map((el) => el.textContent)
+      );
+
+      // Scrape all p elements
+      dataObj["blogContent"] = await newPage.$$eval(
+        ".story-grid div > p",
+        (elements) => elements.map((el) => el.textContent)
+      );
+
+      await newPage.close();
+      return dataObj;
+    };
+
+    // Function to load more blogs by clicking the ".more" button
+    const loadMoreBlogs = async () => {
+      let hasMoreButton = true;
+      while (hasMoreButton) {
+        const moreButton = await page.$(".more");
+        if (moreButton) {
+          try {
+            await moreButton.click();
+            await page.waitForTimeout(2000); // Wait for the new content to load (adjust the wait time as needed)
+          } catch (error) {
+            // Handle the error when the "more" button is not clickable
+            hasMoreButton = false;
+          }
+        } else {
+          hasMoreButton = false;
+        }
+      }
+    };
+
+    // Load more blogs and scrape data
+    await loadMoreBlogs();
+
+    // Get the links to all the required blogs
+    let urls = await page.evaluate(() => {
+      const links = [];
+      const linkElements = document.querySelectorAll(".stories-set a");
+      linkElements.forEach((el) => {
+        links.push(el.href);
+      });
+      return links;
+    });
+
+    // Scrape data from each blog page
+    for (let link of urls) {
+      let currentPageData = await scrapePage(link);
+      data.push(currentPageData);
+    }
+
+    // Define CSV writer and write the data to a CSV file
+    const csvWriter = createCsvWriter({
+      path: "scraped_data.csv",
+      header: [
+        { id: "blogTitles", title: "Blog Titles" },
+        { id: "blogContent", title: "Blog Content" },
+      ],
+    });
+
+    csvWriter
+      .writeRecords(data)
+      .then(() => console.log("CSV file written successfully"))
+      .catch((error) => console.error("Error writing CSV file:", error));
+  },
+};
+
+module.exports = scraperObject;
